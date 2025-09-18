@@ -2,7 +2,6 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
 
 # ---------- Math utilities ----------
 def deg2rad(d): return np.deg2rad(d)
@@ -59,43 +58,42 @@ def axes_traces(limit=1.2):
                    line=dict(color='gray', width=4), showlegend=False)
     return [x,y,z]
 
-def plane_surfaces(limit=1.2, opacity=0.08):
+def plane_xy_bottom(limit=1.2, opacity=0.12):
     rng = np.linspace(-limit, limit, 2)
     X, Y = np.meshgrid(rng, rng)
-    # Planes at cube edges (not through origin)
-    s_xy = go.Surface(x=X, y=Y, z=np.full_like(X, limit),
-                      opacity=opacity, showscale=False, name='XY plane (top)')
-    s_zx = go.Surface(x=X, y=np.full_like(X, limit), z=Y,
-                      opacity=opacity, showscale=False, name='ZX plane (front)')
-    s_zy = go.Surface(x=np.full_like(X, limit), y=X, z=Y,
-                      opacity=opacity, showscale=False, name='ZY plane (side)')
-    return [s_xy, s_zx, s_zy]
+    # XY plane at bottom face z = -limit
+    s_xy = go.Surface(x=X, y=Y, z=np.full_like(X, -limit),
+                      opacity=opacity, showscale=False, name='XY bottom')
+    return s_xy
 
-def projected_line(start, vec, plane='xy', color='rgba(0,0,0,0.6)', name='proj', width=6, limit=1.2):
+def planes_offset_zx_zy(limit=1.2, opacity=0.08, offset=0.3):
+    rng = np.linspace(-limit, limit, 2)
+    X, Y = np.meshgrid(rng, rng)
+    # ZX plane at y=+offset
+    s_zx = go.Surface(x=X, y=np.full_like(X, offset), z=Y,
+                      opacity=opacity, showscale=False, name=f'ZX (y={offset})')
+    # ZY plane at x=+offset
+    s_zy = go.Surface(x=np.full_like(X, offset), y=X, z=Y,
+                      opacity=opacity, showscale=False, name=f'ZY (x={offset})')
+    return [s_zx, s_zy]
+
+def projected_line_xy_bottom(start, vec, color='rgba(0,0,0,0.65)', width=6, limit=1.2):
     s=np.array(start); v=np.array(vec)
     tip = s + v
     eps = 1e-3
-    if plane=='xy':
-        sP = np.array([s[0], s[1], limit - eps])
-        tP = np.array([tip[0], tip[1], limit - eps])
-    elif plane=='zx':
-        sP = np.array([s[0], limit - eps, s[2]])
-        tP = np.array([tip[0], limit - eps, tip[2]])
-    elif plane=='zy':
-        sP = np.array([limit - eps, s[1], s[2]])
-        tP = np.array([limit - eps, tip[1], tip[2]])
-    else:
-        raise ValueError("plane must be 'xy', 'zx', or 'zy'")
+    z_plane = -limit + eps
+    sP = np.array([s[0], s[1], z_plane])
+    tP = np.array([tip[0], tip[1], z_plane])
     line=go.Scatter3d(x=[sP[0], tP[0]], y=[sP[1], tP[1]], z=[sP[2], tP[2]],
                       mode='lines+markers',
                       line=dict(color=color, width=width),
                       marker=dict(size=3, color=color),
-                      name=name, showlegend=False)
+                      name='proj', showlegend=False)
     return line
 
 # ---------- Streamlit UI ----------
-st.set_page_config(page_title="Apparent Rotation Visualizer (3D + Edge Projections)", layout="wide")
-st.title("Apparent Rotation Visualizer – Interactive 3D with Projections at Cube Edges")
+st.set_page_config(page_title="Apparent Rotation Visualizer (3D + Bottom XY projection)", layout="wide")
+st.title("Apparent Rotation Visualizer – 3D with XY projection on bottom face")
 
 colL, colR = st.columns([1,1])
 with colL:
@@ -104,7 +102,7 @@ with colL:
 with colR:
     rot_yx = st.number_input("YX true rotation γ (about Z) [deg]", value=0.0, step=1.0, format="%.2f")
     offset  = st.slider("Anterior offset (units)", 0.0, 1.5, 0.0, 0.05)
-    show_proj = st.checkbox("Show projections on XY/ZX/ZY cube faces", value=True)
+    plane_offset = st.slider("ZX/ZY plane offset (away from origin)", 0.0, 1.0, 0.3, 0.05)
 
 res = simulate_construct(ang_yz, ang_zx, rot_yx, L=1.0)
 
@@ -115,7 +113,9 @@ base_prox=origin+offset*uZp; base_dist=origin+offset*uZd
 limit=1.2
 traces = []
 traces += axes_traces(limit=limit)
-traces += plane_surfaces(limit=limit, opacity=0.10 if show_proj else 0.0)
+# planes: XY at bottom face, plus ZX & ZY offset away from origin
+traces.append(plane_xy_bottom(limit=limit, opacity=0.12))
+traces += planes_offset_zx_zy(limit=limit, opacity=0.08, offset=plane_offset)
 
 # Main arrows
 traces += arrow_trace(origin, res["Z_prox"],  'royalblue',  "Z_prox")
@@ -123,22 +123,11 @@ traces += arrow_trace(origin, res["Z_dist"],  'darkorange', "Z_dist")
 traces += arrow_trace(base_prox, res["A_prox"], 'seagreen',  "A_prox")
 traces += arrow_trace(base_dist, res["A_dist"], 'crimson',   "A_dist")
 
-# Projections onto faces
-if show_proj:
-    traces += [projected_line(origin, res["Z_prox"], plane='xy', color='rgba(65,105,225,0.6)', limit=limit)]
-    traces += [projected_line(origin, res["Z_dist"], plane='xy', color='rgba(255,140,0,0.6)', limit=limit)]
-    traces += [projected_line(base_prox, res["A_prox"], plane='xy', color='rgba(46,139,87,0.6)', limit=limit)]
-    traces += [projected_line(base_dist, res["A_dist"], plane='xy', color='rgba(220,20,60,0.6)', limit=limit)]
-
-    traces += [projected_line(origin, res["Z_prox"], plane='zx', color='rgba(65,105,225,0.6)', limit=limit)]
-    traces += [projected_line(origin, res["Z_dist"], plane='zx', color='rgba(255,140,0,0.6)', limit=limit)]
-    traces += [projected_line(base_prox, res["A_prox"], plane='zx', color='rgba(46,139,87,0.6)', limit=limit)]
-    traces += [projected_line(base_dist, res["A_dist"], plane='zx', color='rgba(220,20,60,0.6)', limit=limit)]
-
-    traces += [projected_line(origin, res["Z_prox"], plane='zy', color='rgba(65,105,225,0.6)', limit=limit)]
-    traces += [projected_line(origin, res["Z_dist"], plane='zy', color='rgba(255,140,0,0.6)', limit=limit)]
-    traces += [projected_line(base_prox, res["A_prox"], plane='zy', color='rgba(46,139,87,0.6)', limit=limit)]
-    traces += [projected_line(base_dist, res["A_dist"], plane='zy', color='rgba(220,20,60,0.6)', limit=limit)]
+# Only XY projection ON THE BOTTOM FACE
+traces += [projected_line_xy_bottom(origin,    res["Z_prox"], color='rgba(65,105,225,0.6)', limit=limit)]
+traces += [projected_line_xy_bottom(origin,    res["Z_dist"], color='rgba(255,140,0,0.6)', limit=limit)]
+traces += [projected_line_xy_bottom(base_prox, res["A_prox"], color='rgba(46,139,87,0.6)', limit=limit)]
+traces += [projected_line_xy_bottom(base_dist, res["A_dist"], color='rgba(220,20,60,0.6)', limit=limit)]
 
 fig3d = go.Figure(data=traces)
 fig3d.update_layout(scene=dict(
@@ -152,4 +141,4 @@ st.plotly_chart(fig3d, use_container_width=True)
 
 phi = res["phi_app"]
 st.metric("φ apparent (deg)", f"{phi:.2f}" if np.isfinite(phi) else "undefined")
-st.caption("3D shows vectors + their projections onto cube faces (XY top, ZX front, ZY side).")
+st.caption("Bottom face shows XY projection only; ZX and ZY planes are offset from the origin to declutter the view.")
